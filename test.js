@@ -1,6 +1,6 @@
 // Run with: node test.js
 const assert = require('assert');
-const { authorFromCite, summarize, shortClaim, buildHeaders, toHtml, toText } = require('./plugin.js');
+const { authorFromCite, summarize, shortClaim, negateClaim, buildHeaders, toHtml, toText } = require('./plugin.js');
 
 const s = (kind, text) => ({ kind, text, source: 'cmsrc1.x' });
 
@@ -50,15 +50,39 @@ const items = [
 
 const headers = buildHeaders(items, {});
 assert.deepStrictEqual(headers, [
-  { block: '2AC---AT: Garcia 23', analytic: '[1NC 1] "China preempts TNW deployment" is wrong:' },
-  { block: '2AC---AT: No Allied Buy-In', analytic: '[1NC 2] "No allied buy-in, so the plan never gets implemented" is wrong:' },
-  { block: '2AC---AT: Pentagon Warming Tactical', analytic: '[1NC 3] "Pentagon is warming to tactical nukes" is wrong:' },
-  { block: '2AC---AT: Takaichi 26', analytic: '[1NC 4] "Japan will revise the non-nuclear principles" is wrong:' },
-  { block: '2AC---AT: Kihara 25', analytic: '[1NC 5] "Consultation is binding and solves" is wrong:' },
+  { block: '2AC---AT: Garcia 23', analytic: "[1NC 1] China doesn't preempt TNW deployment:" },
+  { block: '2AC---AT: No Allied Buy-In', analytic: '[1NC 2] Allies buy in:' },
+  { block: '2AC---AT: Pentagon Warming Tactical', analytic: "[1NC 3] Pentagon isn't warming to tactical nukes:" },
+  { block: '2AC---AT: Takaichi 26', analytic: "[1NC 4] Japan won't revise the non-nuclear principles:" },
+  { block: '2AC---AT: Kihara 25', analytic: "[1NC 5] Consultation doesn't solve:" },
 ]);
 
+const quoted = buildHeaders(items, { answerStyle: 'Quote the claim + "is wrong"' });
+assert.strictEqual(quoted[0].analytic, '[1NC 1] "China preempts TNW deployment" is wrong:');
+
 const restarted = buildHeaders(items, { restartPerBlock: true, speech: '1AR', answering: '2NC' });
-assert.strictEqual(restarted[4].analytic, '[2NC 1] "Consultation is binding and solves" is wrong:');
+assert.strictEqual(restarted[4].analytic, "[2NC 1] Consultation doesn't solve:");
+
+const flips = [
+  ['Emboldenment inevitable – US mutual defense treaty, alliance commitments', "Emboldenment isn't inevitable"],
+  ['Alt causes to US-China relations', 'No alt causes to relations'],
+  ['China won’t preempt TNWs', 'China will preempt TNWs'],
+  ['Allies don’t accept TNWs', 'Allies accept TNWs'],
+  ['Sanctions cause war', "Sanctions don't cause war"],
+  ['Relations high', 'Relations low'],
+  ['Thumpers', 'No thumpers'],
+  ['China has collapsed', "China hasn't collapsed"],
+  ['US credibility shot', "US credibility isn't shot"],
+  ['Perm do both---shields the link', null],
+  ['The CP is competitive and solves the case', "The CP doesn't solve the case"],
+  ['Relations high and rising', 'Relations low'],
+  ['China will retaliate and escalate to nuclear war', "China won't retaliate"],
+  ['The US and China cooperate', null],
+  ['No Chinese retaliation', 'China retaliates'],
+  ['No US follow-through', 'The US follows through'],
+  ['No solvency', 'Yes solvency'],
+];
+for (const [claim, want] of flips) assert.strictEqual(negateClaim(claim, 10), want, claim);
 assert.strictEqual(restarted[0].block, '1AR---AT: Garcia 23');
 
 const noYear = buildHeaders(items, { includeYear: false });
