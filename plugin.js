@@ -506,8 +506,117 @@
     api.showToast('Copied ' + n + ' 2AC block header' + (n === 1 ? '' : 's') + '.');
   }
 
+  // ---- Card inbox -------------------------------------------------------
+  //
+  // The card chopping project pushes each batch it cuts to a private GitHub
+  // repo as CardMirror-native HTML: latest.html (the newest batch) plus
+  // batches/<name>.html. "Insert latest chopped cards" fetches latest.html
+  // and pastes it at the cursor, so the cards land as real tags, cites and
+  // card bodies with their underlining, emphasis, highlighting and shrink.
+
+  var INBOX_DEFAULTS = {
+    inboxRepo: 'rneydebate/card-inbox',
+    githubToken: '',
+  };
+
+  /** "owner/repo", a github.com URL, or "owner/repo.git" -> "owner/repo". */
+  function normalizeRepo(s) {
+    var m = /(?:github\.com[/:])?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(s || '').trim());
+    return m ? m[1] + '/' + m[2] : '';
+  }
+
+  /** The batch name the inbox writes as a leading <!--batch: ...--> comment. */
+  function batchName(html) {
+    var m = /^\s*<!--\s*batch:\s*([\s\S]*?)\s*-->/.exec(html);
+    return m ? m[1] : '';
+  }
+
+  function htmlToText(html) {
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    return div.innerText || div.textContent || '';
+  }
+
+  var FETCH_ERRORS = {
+    401: 'GitHub rejected the token. Check "GitHub token" in this plugin\'s settings.',
+    403: 'GitHub refused access. The token needs read access to the card inbox repo.',
+    404: 'No cards in the inbox yet (or the token can\'t see the repo).',
+  };
+
+  async function fetchLatestCards(repo, token) {
+    var headers = { Accept: 'application/vnd.github.raw+json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    var res = await fetch('https://api.github.com/repos/' + repo + '/contents/latest.html', {
+      headers: headers,
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(FETCH_ERRORS[res.status] || 'GitHub returned ' + res.status + '.');
+    return res.text();
+  }
+
+  /** The editor to insert into: the focused one, else the one holding the
+   *  DOM selection, else the only one open. */
+  function targetEditor() {
+    var focused = document.querySelector('.ProseMirror.ProseMirror-focused');
+    if (focused) return focused;
+    var sel = window.getSelection && window.getSelection();
+    var node = sel && sel.anchorNode;
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    var root = el && el.closest && el.closest('.ProseMirror');
+    if (root) return root;
+    var all = document.querySelectorAll('.ProseMirror');
+    return all.length === 1 ? all[0] : null;
+  }
+
+  /** Hand the HTML to the editor as a paste, the same path a Ctrl+V of
+   *  CardMirror's own clipboard takes. Returns true if the editor took it. */
+  function pasteIntoEditor(root, html, text) {
+    if (typeof DataTransfer === 'undefined' || typeof ClipboardEvent === 'undefined') return false;
+    var dt = new DataTransfer();
+    dt.setData('text/html', html);
+    dt.setData('text/plain', text);
+    var ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    if (!ev.clipboardData) return false;
+    root.focus();
+    root.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }
+
+  async function insertLatestCards(api) {
+    var repo = normalizeRepo(api.settings.get('inboxRepo') || INBOX_DEFAULTS.inboxRepo);
+    var token = String(api.settings.get('githubToken') || '').trim();
+    if (!repo) {
+      api.showToast('Set "Card inbox repo" in this plugin\'s settings.');
+      return;
+    }
+    var root = targetEditor();
+    if (!root) {
+      api.showToast('Click in a document where the cards should go, then run this again.');
+      return;
+    }
+    var html;
+    try {
+      html = await fetchLatestCards(repo, token);
+    } catch (err) {
+      api.showToast("Couldn't get the cards: " + (err && err.message ? err.message : err));
+      return;
+    }
+    var name = batchName(html);
+    var label = name ? '"' + name + '"' : 'the latest cards';
+    var text = htmlToText(html);
+    if (pasteIntoEditor(root, html, text)) {
+      api.showToast('Inserted ' + label + '.');
+      return;
+    }
+    if (await writeClipboard(html, text)) {
+      api.showToast('Copied ' + label + '. Click where they go and press Ctrl+V.');
+    } else {
+      api.showToast("Couldn't insert the cards. The clipboard was busy. Try again.");
+    }
+  }
+
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { authorFromCite: authorFromCite, summarize: summarize, shortClaim: shortClaim, negateClaim: negateClaim, buildHeaders: buildHeaders, toHtml: toHtml, toText: toText };
+    module.exports = { authorFromCite: authorFromCite, summarize: summarize, shortClaim: shortClaim, negateClaim: negateClaim, buildHeaders: buildHeaders, toHtml: toHtml, toText: toText, normalizeRepo: normalizeRepo, batchName: batchName };
   }
 
   if (typeof window === 'undefined' || !window.__registerCardMirrorPlugin) return;
@@ -566,6 +675,20 @@
         default: DEFAULTS.restartPerBlock,
         description: 'For a selection that spans several off-case positions.',
       },
+      {
+        key: 'inboxRepo',
+        label: 'Card inbox repo',
+        type: 'text',
+        default: INBOX_DEFAULTS.inboxRepo,
+        description: 'The private GitHub repo the card chopping project pushes cards to, as "owner/repo".',
+      },
+      {
+        key: 'githubToken',
+        label: 'GitHub token',
+        type: 'text',
+        default: INBOX_DEFAULTS.githubToken,
+        description: 'A fine-grained token with read-only Contents access to the card inbox repo.',
+      },
     ],
     commands: [
       {
@@ -574,6 +697,13 @@
         keywords: ['2AC', 'block', 'header', 'answer', 'AT', '1NC', 'frontline'],
         defaultKey: null,
         run: copyHeaders,
+      },
+      {
+        id: PLUGIN_ID + '.insertLatestCards',
+        label: 'Insert latest chopped cards',
+        keywords: ['insert', 'cards', 'chop', 'cut', 'inbox', 'Claude', 'evidence'],
+        defaultKey: null,
+        run: insertLatestCards,
       },
     ],
   });
