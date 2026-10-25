@@ -540,7 +540,6 @@
   var FETCH_ERRORS = {
     401: 'GitHub rejected the token. Check "GitHub token" in this plugin\'s settings.',
     403: 'GitHub refused access. The token needs read access to the card inbox repo.',
-    404: 'No cards in the inbox yet (or the token can\'t see the repo).',
   };
 
   async function fetchLatestCards(repo, token) {
@@ -550,6 +549,14 @@
       headers: headers,
       cache: 'no-store',
     });
+    if (res.status === 404) {
+      // A private repo the token can't see also answers 404, so ask about
+      // the repo itself to tell "no cards yet" from "no access".
+      var repoRes = await fetch('https://api.github.com/repos/' + repo, { headers: headers, cache: 'no-store' });
+      throw new Error(repoRes.ok
+        ? 'No cards in the inbox yet.'
+        : 'The token can\'t see ' + repo + '. Give it read-only Contents access to that repo.');
+    }
     if (!res.ok) throw new Error(FETCH_ERRORS[res.status] || 'GitHub returned ' + res.status + '.');
     return res.text();
   }
@@ -587,6 +594,10 @@
     var token = String(api.settings.get('githubToken') || '').trim();
     if (!repo) {
       api.showToast('Set "Card inbox repo" in this plugin\'s settings.');
+      return;
+    }
+    if (!token) {
+      api.showToast('Paste your GitHub token into "GitHub token" in this plugin\'s settings.');
       return;
     }
     var root = targetEditor();
