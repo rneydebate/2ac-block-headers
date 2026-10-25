@@ -94,5 +94,12 @@ assert.strictEqual(
   '<h3 class="pmd-block">2AC---AT: A &amp; B</h3><div class="pmd-analytic-unit"><p class="pmd-analytic Analytic">[1NC 1] &quot;x &lt; y&quot; is wrong:</p></div>',
 );
 
+const { normalizeRepo, batchName } = require('./plugin.js');
+assert.strictEqual(normalizeRepo('rneydebate/card-inbox'), 'rneydebate/card-inbox');
+assert.strictEqual(normalizeRepo('https://github.com/rneydebate/card-inbox.git'), 'rneydebate/card-inbox');
+assert.strictEqual(normalizeRepo('nope'), '');
+assert.strictEqual(batchName('<!--batch: Cards 10-25-2026 15-10-->\n<div class="pmd-card">'), 'Cards 10-25-2026 15-10');
+assert.strictEqual(batchName('<div class="pmd-card">'), '');
+
 console.log(toText(headers));
 console.log('\nAll tests passed.');
